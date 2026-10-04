@@ -93,7 +93,10 @@ export interface BridgeHandle {
   on(event: "conn", cb: (connected: boolean) => void): void;
   on(event: "phones", cb: (onlineCount: number) => void): void;
   on(event: "sessions", cb: () => void): void; // 会话列表有变（注册/改名）→ 重取 snapshot()
+  on(event: "revoked", cb: (deviceId: string) => void): void; // 手机侧发起撤销到达（本地发起的不经此事件）
   snapshot(): BridgeSnapshot;
+  /** 桌面主动解绑一台手机：撤销通知发手机+中继，删本地配对；返回是否真有这台手机 */
+  revokePeer(deviceId: string): boolean;
   /** 桌面本地发起的「还回」（WP5 #49）：温和释放+回执给持有手机，等同手机自己按还回；
    *  非 phone 态=纯幂等 no-op。返回是否走过受理链路（false=没有持有者可还） */
   releaseSession(sessionId: string): boolean;
@@ -904,13 +907,38 @@ export function startBridge(opts: BridgeOptions): BridgeHandle {
   function handleRevoke(env: Envelope): void {
     try {
       const body = JSON.parse(env.body) as PairRevokeBody;
-      const target = body.targetDeviceId;
-      if (peers.delete(target)) {
-        cfg.paired = cfg.paired.filter((p) => p.deviceId !== target);
-        saveConfig(cfg);
-        log(`设备已解绑：${target}（剩余 ${peers.size} 台手机）`);
+      log(`✂ 收到 PairRevoke（from=${env.from}）目标=${body.targetDeviceId}`);
+      if (removePeer(body.targetDeviceId, "incoming")) {
+        log(`设备已解绑：${body.targetDeviceId}（剩余 ${peers.size} 台手机）`);
+      } else {
+        log(`⚠ PairRevoke 目标 ${body.targetDeviceId} 不在本地配对列表，仅记录不处理`);
       }
-    } catch { /* ignore */ }
+    } catch (err) {
+      log(`⚠ PairRevoke 解析失败：${String(err)}`);
+    }
+  }
+
+  /** 删除本地配对并通知对端/中继（CLI unpair 与桌面「解除绑定」共用一份口径）。
+   *  顺序：先发给手机（此刻中继侧配对还在，才能路由），再发给中继删中继侧记录。
+   *  reason=incoming（对端发起，不回发通知）/ local（本端发起，发撤销通知） */
+  function removePeer(target: string, reason: "incoming" | "local"): boolean {
+    log(`removePeer 入口 target=${target} reason=${reason} 在册=${peers.has(target)} 中继就绪=${conn.ready}`);
+    if (!peers.has(target)) return false;
+    if (reason === "local") {
+      // 撤销两帧的发送结果必须可对账：sendPlain 在未就绪时只发 warn 静默丢弃，
+      // 这里先打就绪态、后由 conn.warn → log 兜底，两端都能看到才算发出去
+      conn.sendPlain(target, T.PairRevoke, { targetDeviceId: target } satisfies PairRevokeBody);
+      log(`✂ 已向手机发送 PairRevoke（→${target}）中继就绪=${conn.ready}`);
+      conn.sendPlain("relay", T.PairRevoke, { targetDeviceId: target } satisfies PairRevokeBody);
+      log(`✂ 已向中继发送 PairRevoke（中继就绪=${conn.ready}）`);
+    }
+    peers.delete(target);
+    onlinePeers.delete(target);
+    cfg.paired = cfg.paired.filter((p) => p.deviceId !== target);
+    saveConfig(cfg);
+    log(`✂ 本地配对已清除并落盘（剩余 ${peers.size} 台手机）`);
+    emitter.emit("revoked", target);
+    return true;
   }
 
   function serveSnapshot(peer: PeerKeys, sub: SessionSubscribeBody): void {
@@ -1048,6 +1076,10 @@ export function startBridge(opts: BridgeOptions): BridgeHandle {
         pendingPermissions: controller.pendingCount(),
         sessions: watcher.listSessions().map((s) => ({ ...s, occupancy: occupancyOf(s.sessionId) })),
       };
+    },
+    /** 桌面/CLI 主动解绑一台手机：发撤销通知（手机+中继）+ 删本地配对 */
+    revokePeer(deviceId: string): boolean {
+      return removePeer(deviceId, "local");
     },
     releaseSession(sessionId: string): boolean {
       // 桌面本地还回（WP5）：只对 phone 态有意义——目标取 phoneHold（受理手机），
