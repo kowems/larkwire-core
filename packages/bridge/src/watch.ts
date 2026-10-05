@@ -16,6 +16,7 @@ import {
   type StreamSnapshotBody,
   type StreamAckBody,
   type PairRevokeBody,
+  type PairStatusBody,
   type PairAcceptBody,
   type PresenceBody,
   type SessionUpdateBody,
@@ -694,6 +695,8 @@ export function startBridge(opts: BridgeOptions): BridgeHandle {
         } catch { /* ignore */ }
       } else if (env.type === T.PairRevoke) {
         handleRevoke(env);
+      } else if (env.type === T.PairStatus) {
+        handlePairStatus(env);
       }
       return;
     }
@@ -915,6 +918,23 @@ export function startBridge(opts: BridgeOptions): BridgeHandle {
       }
     } catch (err) {
       log(`⚠ PairRevoke 解析失败：${String(err)}`);
+    }
+  }
+
+  /** #83 连接时对账：中继下发全部 active 对端，本地有、列表里没有的一律清掉。
+   *  覆盖离线队列 TTL（10 分钟）之外的撤销，与离线时长无关；只清理不回发（reason=incoming）。
+   *  若这封来自重连后的连接，入站排队的撤销帧可能已经先处理过——removePeer 幂等，重复无害 */
+  function handlePairStatus(env: Envelope): void {
+    try {
+      const { peers: alivePeers } = JSON.parse(env.body) as PairStatusBody;
+      const alive = new Set(alivePeers);
+      const stale = cfg.paired.map((p) => p.deviceId).filter((id) => !alive.has(id));
+      for (const id of stale) {
+        if (removePeer(id, "incoming")) log(`对账清理：${id} 不在中继 active 列表（裂脑残档）`);
+      }
+      if (stale.length === 0) log(`对账无差异（本地 ${cfg.paired.length} 台手机均在中继侧）`);
+    } catch (err) {
+      log(`⚠ PairStatus 解析失败：${String(err)}`);
     }
   }
 

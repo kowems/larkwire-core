@@ -41,6 +41,12 @@ export interface PairRevokeBody {
   targetDeviceId: string; // 被踢掉的设备
 }
 
+/** #83：中继鉴权后下发的对账单——本设备当前全部 active 对端 deviceId。
+ *  设备侧把本地配对与此列表比对，不在其中的一律清掉（中继是配对唯一事实源） */
+export interface PairStatusBody {
+  peers: string[];
+}
+
 // ---------- 会话 ----------
 
 export type AgentKind = "claude-code" | "codex" | "tmux" | "unknown";

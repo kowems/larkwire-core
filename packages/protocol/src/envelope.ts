@@ -32,6 +32,7 @@ export const T = {
   PairConfirm: "pair.confirm",
   PairError: "pair.error",
   PairRevoke: "pair.revoke",
+  PairStatus: "pair.status", // #83 增补：中继鉴权后下发当前全部 active 对端——连接即对账，根治离线撤销裂脑
   // 会话
   SessionRegister: "session.register",
   SessionUpdate: "session.update",
@@ -80,16 +81,18 @@ export const PLAINTEXT_BODY_TYPES: ReadonlySet<string> = new Set([
   T.PairAcceptAck,
   T.PairError,
   T.PairRevoke,
+  T.PairStatus, // 中继单方构造下发，设备侧验 from==="relay"
   T.PresenceOnline, // 中继代发（它无法持有任何共享密钥），内容 = 在线状态，本属明文集合
   T.PresenceOffline,
 ]);
 
 /**
- * 中继离线队列只保这三类小消息（架构 §2.4 修订）：
+ * 中继离线队列只保通知/在场/会话/撤销类小消息（架构 §2.4 修订；#83 增补 pair.revoke）：
  * 流式内容不进中继队列（50 条几秒就冲掉），靠桥侧 seq/lastAck 重放。
  */
 export const QUEUEABLE_TYPES: ReadonlySet<string> = new Set([
   T.NotifyRequest,
+  T.PairRevoke, // #83：离线撤销必须送达（body 明文，离线方无桥密钥也能读），覆盖离线 ≤10 分钟
   T.PresenceOnline,
   T.PresenceOffline,
   T.SessionRegister,
