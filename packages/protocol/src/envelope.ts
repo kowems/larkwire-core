@@ -14,11 +14,17 @@ export interface Envelope {
   seq: number; // 每会话单调递增；看模式 = 转录字节偏移推导
   body: string; // base64 密文（pair.* 引导期例外，见下）
   // M3 推送：顶层明文可选提示（"permission"/"runDone"）——中继路由时凭它选推送文案模板，
-  // 无需解密 body（工具名/命令不出端）。旧端忽略未知字段 = 向后兼容
+  // 无需解密 body。旧端忽略未知字段 = 向后兼容
   hint?: string;
   // 通知直达（第一刀补洞 C）：会话 id 明文可选——中继把它塞进个推 payload，点通知直落
   // 该会话流页（hint 同款口径：明文不涉密，body 仍 E2E；旧端忽略 = 向后兼容）
   sid?: string;
+  // 推送增强（2026-10-08 Eric 拍板，修订 2026-09-21「工具名不出端」口径）：
+  // proj = 项目目录名（cwd 最后一段，中继渲染进推送标题/正文）；tool = 权限工具名（仅 permission）。
+  // 红线：完整路径/命令/输入/会话标题永不出端；桥侧只填 basename，中继再消毒。
+  // 旧端忽略未知字段 = 向后兼容（缺字段时中继回退通用文案）
+  proj?: string;
+  tool?: string;
 }
 
 /** 消息类型清单（架构 §2.2 v1 + M0 落地增补 session.subscribe / stream.ack） */
@@ -113,10 +119,14 @@ export function makeEnvelope(
   body: string,
   hint?: string, // M3：推送文案模板标签（明文，见 Envelope.hint）；undefined 则不序列化该字段
   sid?: string, // 通知直达：会话 id（明文可选，notify.request 专属，见 Envelope.sid）
+  proj?: string, // 推送增强：项目目录 basename（明文可选，见 Envelope.proj）
+  tool?: string, // 推送增强：权限工具名（明文可选，见 Envelope.tool）
 ): Envelope {
   const env: Envelope = { v: 1, type, id: uuid(), ts: nowTs(), from, to, seq, body };
   if (hint !== undefined) env.hint = hint;
   if (sid !== undefined) env.sid = sid;
+  if (proj !== undefined) env.proj = proj;
+  if (tool !== undefined) env.tool = tool;
   return env;
 }
 

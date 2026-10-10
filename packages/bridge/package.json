@@ -1,6 +1,6 @@
 {
   "name": "@larkwire/core",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "灵鹊 Larkwire 桥：跑在你的电脑上，把 Claude Code 会话送上手机（看/接/控）",
   "license": "MIT",
   "type": "module",

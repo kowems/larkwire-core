@@ -163,11 +163,24 @@ export class RelayConnection extends EventEmitter {
     this.sendEnvelope(makeEnvelope(type, this.hello.deviceId, to, seq, JSON.stringify(body)));
   }
 
-  /** E2E 密文 body（业务消息全走这里）；hint=推送文案模板标签（M3，明文可选）；sid=通知直达会话 id（明文可选） */
-  sendSecure(peer: PeerKeys, type: MessageType, body: unknown, seq: number, hint?: string, sid?: string): void {
+  /**
+   * E2E 密文 body（业务消息全走这里）；
+   * hint=推送文案模板标签（M3，明文可选）；sid=通知直达会话 id（明文可选）；
+   * proj=项目目录 basename / tool=权限工具名（推送增强，明文可选，见 Envelope.proj/tool）
+   */
+  sendSecure(
+    peer: PeerKeys,
+    type: MessageType,
+    body: unknown,
+    seq: number,
+    hint?: string,
+    sid?: string,
+    proj?: string,
+    tool?: string,
+  ): void {
     const shared = deriveSharedKey(peer.publicKey, this.secretKey);
     const cipher = encryptBody(shared, body);
-    this.sendEnvelope(makeEnvelope(type, this.hello.deviceId, peer.deviceId, seq, cipher, hint, sid));
+    this.sendEnvelope(makeEnvelope(type, this.hello.deviceId, peer.deviceId, seq, cipher, hint, sid, proj, tool));
   }
 
   /** 解密来自某 peer 的信封 body */

@@ -33,7 +33,7 @@ import {
   type NotifyRequestBody,
   type UiEvent,
 } from "@larkwire/protocol";
-import { loadConfig, saveConfig, configKeyPair, type PairedPeer } from "./config.js";
+import { loadConfig, saveConfig, configKeyPair, envRelayUrl, type PairedPeer } from "./config.js";
 import { RelayConnection, type PeerKeys } from "./connection.js";
 import { TranscriptWatcher, type WatchedSession } from "./watcher.js";
 import { SessionController, type PermissionInfo } from "./controller.js";
@@ -141,8 +141,10 @@ export function startBridge(opts: BridgeOptions): BridgeHandle {
     emitter.emit("log", line);
   }
   // --relay 只是本次临时覆盖：绝不写进 cfg（否则 handleRevoke 的 saveConfig 会把临时值静默持久化——2026-09-16 踩过）
-  const relayUrl = opts.relayOverride ?? cfg.relay;
-  if (opts.relayOverride && opts.relayOverride !== cfg.relay) {
+  // LARKWIRE_RELAY_URL 环境变量同为进程级不落盘（e2e 隔离 HOME 起本地中继用），优先级在 --relay 之下
+  const envRelay = envRelayUrl();
+  const relayUrl = opts.relayOverride ?? envRelay ?? cfg.relay;
+  if ((opts.relayOverride ?? envRelay) && relayUrl !== cfg.relay) {
     log(`⚠ 本次临时使用中继 ${relayUrl}（配置里的 ${cfg.relay} 未改动）`);
   }
 
@@ -198,11 +200,20 @@ export function startBridge(opts: BridgeOptions): BridgeHandle {
   const RUN_SUPPRESS_GRACE_MS = 10_000;
 
   // hint（M3）= 推送文案模板标签（"permission"/"runDone"）——notify 广播才带，
-  // 中继路由时凭它选模板，无需解密 body（工具名/命令不出端）；
-  // sid = 通知直达会话 id（明文可选）——中继塞进个推 payload，点通知直落该会话流页
-  function broadcast(type: string, bodyOf: () => unknown, seq: number, hint?: string, sid?: string): void {
+  // 中继路由时凭它选模板，无需解密 body；
+  // sid = 通知直达会话 id（明文可选）——中继塞进个推 payload，点通知直落该会话流页；
+  // proj/tool = 推送增强（2026-10-08 拍板）：项目目录 basename / 权限工具名，中继渲染进文案
+  function broadcast(
+    type: string,
+    bodyOf: () => unknown,
+    seq: number,
+    hint?: string,
+    sid?: string,
+    proj?: string,
+    tool?: string,
+  ): void {
     for (const peer of peers.values()) {
-      conn.sendSecure(peer, type as never, bodyOf(), seq, hint, sid);
+      conn.sendSecure(peer, type as never, bodyOf(), seq, hint, sid, proj, tool);
     }
   }
 
@@ -251,7 +262,8 @@ export function startBridge(opts: BridgeOptions): BridgeHandle {
   controller.on("permission", (info: PermissionInfo) => {
     if (onlinePeers.size === 0) {
       // Eric 拍板 2026-09-17：无手机在线【不代拒】——卡在授权等手机回来（上线时重投）。
-      // M3 弹通知已落地：notify 广播 → 中继见手机离线转 uni-push（文案通用化，工具名不出端）
+      // M3 弹通知已落地：notify 广播 → 中继见手机离线转 uni-push。
+      // 2026-10-08 增强：proj/tool 走信封外层明文，推送里显示「目录 · 工具名」
       controller.onAllPhonesOffline(); // 看门狗停摆
       broadcast(
         T.NotifyRequest,
@@ -259,6 +271,8 @@ export function startBridge(opts: BridgeOptions): BridgeHandle {
         0,
         "permission",
         info.sessionId,
+        watcher.getSession(info.sessionId)?.project,
+        info.tool,
       );
       log(`权限请示 ${info.tool} 但无手机在线 → 挂起等手机（已发推送）`);
       return;
@@ -344,6 +358,7 @@ export function startBridge(opts: BridgeOptions): BridgeHandle {
         0,
         "runDone",
         e.sessionId,
+        watcher.getSession(e.sessionId)?.project,
       );
     }
   });
@@ -595,6 +610,7 @@ export function startBridge(opts: BridgeOptions): BridgeHandle {
       0,
       "runDone",
       sessionId,
+      watcher.getSession(sessionId)?.project,
     );
     log(`人离开（键鼠空闲 ${Math.round(idleSec / 60)} 分钟）+ 回合完成 ${sessionId.slice(0, 8)}… → 已发推送`);
   }

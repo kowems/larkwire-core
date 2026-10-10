@@ -1,6 +1,6 @@
 {
   "name": "@larkwire/protocol",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "灵鹊 Larkwire 三端共享协议：信封 / 消息类型 / E2E 加密 / UiEvent",
   "license": "MIT",
   "type": "module",

@@ -56,13 +56,25 @@ export function saveConfig(cfg: BridgeConfig): void {
   } catch { /* Windows 宽容 */ }
 }
 
+/**
+ * 环境变量中继覆盖（进程级、不落盘）：e2e 用隔离 HOME 起本地中继、自托管部署都靠它，
+ * 优先级在显式 relayOverride（pair 流程的 --relay，会持久化）之下。
+ */
+export function envRelayUrl(): string | undefined {
+  const v = process.env.LARKWIRE_RELAY_URL;
+  return v && v.trim() ? v.trim() : undefined;
+}
+
 /** 首次运行：生成设备身份 */
 export function loadOrCreateConfig(relayOverride?: string): BridgeConfig {
+  const env = envRelayUrl();
   const existing = loadConfig();
   if (existing) {
     if (relayOverride && existing.relay !== relayOverride) {
       existing.relay = relayOverride;
       saveConfig(existing);
+    } else if (!relayOverride && env && existing.relay !== env) {
+      existing.relay = env; // 进程级覆盖，不回写
     }
     return existing;
   }
@@ -73,7 +85,7 @@ export function loadOrCreateConfig(relayOverride?: string): BridgeConfig {
     publicKey,
     secretKey: u8ToB64(kp.secretKey),
     name: hostname().replace(/\.(local|lan)$/, ""),
-    relay: relayOverride ?? DEFAULT_RELAY,
+    relay: relayOverride ?? env ?? DEFAULT_RELAY,
     pairPageBase: DEFAULT_PAIR_PAGE,
     paired: [],
   };
